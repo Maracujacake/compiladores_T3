@@ -1,7 +1,7 @@
 /*
 Alunos: 
 Christian Coronel da Silva Polli - 798083
-
+Lucas Roberto da Silva - 760929
 */
 
 package br.ufscar.dc.compiladores.alguma.lexico;
