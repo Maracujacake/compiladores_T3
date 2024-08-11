@@ -24,20 +24,20 @@ public class Principal {
                 CharStream cs = CharStreams.fromFileName(args[0]);
                 
                 // Inicialização do analisador léxico.
-                AlgumaGramT4Lexer lexer = new AlgumaGramT4Lexer(cs);
+                AlgumaGramT3Lexer lexer = new AlgumaGramT3Lexer(cs);
                 CommonTokenStream tokens = new CommonTokenStream(lexer);
                 
                 // Inicialização do analisador sintático.
-                AlgumaGramT4Parser parser = new AlgumaGramT4Parser(tokens);
-                AlgumaGramT4Parser.ProgramaContext arvore = parser.programa();
-                AlgumaT4Semantico t3Semantico = new AlgumaT4Semantico();
+                AlgumaGramT3Parser parser = new AlgumaGramT3Parser(tokens);
+                AlgumaGramT3Parser.ProgramaContext arvore = parser.programa();
+                AlgumaT3Semantico t3Semantico = new AlgumaT3Semantico();
                 
                 // Inicialização do programa.
                 t3Semantico.visitPrograma(arvore);
                 
                 // Verifica a existência de erros, imprime todos os que foram identificados
                 // e encerra a execução do analisador.
-                AlgumaT4SemanticoUtils.errosSemanticos.forEach((s) -> pw.println(s));
+                AlgumaT3SemanticoUtils.errosSemanticos.forEach((s) -> pw.println(s));
                 pw.println("Fim da compilacao");
                 pw.close();                
             } catch (RuntimeException e) {

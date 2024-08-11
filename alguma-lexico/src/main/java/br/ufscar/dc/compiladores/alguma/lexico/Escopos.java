@@ -23,8 +23,4 @@ public final class Escopos {
     public List<TabelaDeSimbolos> percorrerEscoposAninhados() {
         return pilhaDeTabelas;
     }
-
-    public void abandonarEscopo(){
-        pilhaDeTabelas.pop();
-    }
 }

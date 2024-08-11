@@ -1,298 +1,189 @@
 package br.ufscar.dc.compiladores.alguma.lexico;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-
 import org.antlr.v4.runtime.Token;
-
-import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT4SemanticoUtils.adicionaErroSemantico;
-import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT4SemanticoUtils.confereTipo;
-import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT4SemanticoUtils.verificaCompatibilidade;
-import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT4SemanticoUtils.verificarTipo;
 import br.ufscar.dc.compiladores.alguma.lexico.TabelaDeSimbolos.TipoAlguma;
-import br.ufscar.dc.compiladores.alguma.lexico.TabelaDeSimbolos.TipoEntrada;
+import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT3SemanticoUtils.verificaCompatibilidade;
+import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT3SemanticoUtils.adicionaErroSemantico;
+import static br.ufscar.dc.compiladores.alguma.lexico.AlgumaT3SemanticoUtils.verificarTipo;
 
 
-public class AlgumaT4Semantico extends AlgumaGramT4BaseVisitor<Void> {
 
+public class AlgumaT3Semantico extends AlgumaGramT3BaseVisitor<Void> {
 
+    // Tabela utilizada para armazenar os escopos gerados ao longo da análise
     TabelaDeSimbolos tabela;
 
-
+    // Geração de um conjunto de escopos que serão analisados de forma auxiliar no decorrer da análise
     static Escopos escoposAninhados = new Escopos();
-    
-    static HashMap<String, ArrayList<TipoAlguma>> dadosFuncaoProcedimento = new HashMap<>();
-    
-    HashMap<String, ArrayList<String>> tabelaRegistro = new HashMap<>();
 
-    public void adicionaSimboloTabela(String nome, String tipo, Token nomeT, Token tipoT, TipoEntrada tipoE) {
-        TabelaDeSimbolos tabelaLocal = escoposAninhados.obterEscopoAtual();
+    TabelaDeSimbolos tabelaEscopo;
+
+    // Método que adiciona a variável que está sendo analisado à tabela
+    public void adicionaVariavelTabela(String nome, String tipo, Token nomeT, Token tipoT) {
+
+        tabelaEscopo = escoposAninhados.obterEscopoAtual();
 
         TipoAlguma tipoItem;
-        
-        if (tipo.charAt(0) == '^')
-            tipo = tipo.substring(1);
-        
+
         switch (tipo) {
-            case "literal":
-                tipoItem = TipoAlguma.LITERAL;
-                break;
             case "inteiro":
                 tipoItem = TipoAlguma.INTEIRO;
                 break;
             case "real":
                 tipoItem = TipoAlguma.REAL;
                 break;
+            case "literal":
+                tipoItem = TipoAlguma.LITERAL;
+                break;
             case "logico":
                 tipoItem = TipoAlguma.LOGICO;
-                break;
-            case "void":
-                tipoItem = TipoAlguma.VOID;
-                break;
-            case "registro":
-                tipoItem = TipoAlguma.REGISTRO;
                 break;
             default:
                 tipoItem = TipoAlguma.INVALIDO;
                 break;
         }
-        
+
+        // Caso o tipo seja inválido, exibe a mensagem de que o tipo não foi declarado
         if (tipoItem == TipoAlguma.INVALIDO)
             adicionaErroSemantico(tipoT, "tipo " + tipo + " nao declarado");
-        
-        if (!tabelaLocal.existe(nome))
-            tabelaLocal.adicionar(nome, tipoItem, tipoE);
+
+        // Verifica se a variável já foi declarada, ou seja, já foi adicionada na tabela
+        if (!tabelaEscopo.existe(nome))
+            tabelaEscopo.adicionar(nome, tipoItem);
         else
             adicionaErroSemantico(nomeT, "identificador " + nome + " ja declarado anteriormente");
     }
 
     @Override
-    public Void visitPrograma(AlgumaGramT4Parser.ProgramaContext ctx) {
-        for (AlgumaGramT4Parser.CmdContext c : ctx.corpo().cmd())
-            if (c.cmdRetorne() != null)
-                adicionaErroSemantico(c.getStart(), "comando retorne nao permitido nesse escopo");
-
-        return super.visitPrograma(ctx);
+    public Void visitPrograma(AlgumaGramT3Parser.ProgramaContext contexto) {
+        // Inicialização do programa
+        tabela = new TabelaDeSimbolos();
+        return super.visitPrograma(contexto);
     }
 
     @Override
-    public Void visitDeclaracao_local(AlgumaGramT4Parser.Declaracao_localContext ctx) {
+    public Void visitDeclaracoes(AlgumaGramT3Parser.DeclaracoesContext contexto) {
+        tabela = escoposAninhados.obterEscopoAtual();
+
+        // Verifica a declaração atual
+        for (AlgumaGramT3Parser.Decl_local_globalContext declaracao : contexto.decl_local_global())
+            visitDecl_local_global(declaracao);
+
+        return super.visitDeclaracoes(contexto);
+    }
+
+    @Override
+    public Void visitDecl_local_global(AlgumaGramT3Parser.Decl_local_globalContext contexto) {
+
+        tabela = escoposAninhados.obterEscopoAtual();
+
+        // Identifica se é uma declaração local ou global
+        if (contexto.declaracao_local() != null)
+            visitDeclaracao_local(contexto.declaracao_local());
+        else if (contexto.declaracao_global() != null)
+            visitDeclaracao_global(contexto.declaracao_global());
+
+        return super.visitDecl_local_global(contexto);
+    }
+
+    @Override
+    public Void visitDeclaracao_local(AlgumaGramT3Parser.Declaracao_localContext contexto) {
+
         tabela = escoposAninhados.obterEscopoAtual();
 
         String tipoVariavel;
         String nomeVariavel;
-                
-        if (ctx.getText().contains("declare")) {
-            if (ctx.variavel().tipo().registro() != null) {
 
-                for (AlgumaGramT4Parser.IdentificadorContext ic : ctx.variavel().identificador()) {
-                    adicionaSimboloTabela(ic.getText(), "registro", ic.getStart(), null, TipoEntrada.VARIAVEL);
+        // Tenta identificar uma declaração
+        if (contexto.getText().contains("declare")) {
 
-                    for (AlgumaGramT4Parser.VariavelContext vc : ctx.variavel().tipo().registro().variavel()) {
-                        tipoVariavel = vc.tipo().getText();
-                        
-                        for (AlgumaGramT4Parser.IdentificadorContext icr : vc.identificador())
-                            adicionaSimboloTabela(ic.getText() + "." + icr.getText(), tipoVariavel, icr.getStart(), vc.tipo().getStart(), TipoEntrada.VARIAVEL);
-                    }
-                }
-            } else {
-                tipoVariavel = ctx.variavel().tipo().getText(); 
-                if (tabelaRegistro.containsKey(tipoVariavel)) {
-                    ArrayList<String> variaveisRegistro = tabelaRegistro.get(tipoVariavel);
-                    
-                    for (AlgumaGramT4Parser.IdentificadorContext ic : ctx.variavel().identificador()) {
-                        nomeVariavel = ic.IDENT().get(0).getText();
-                        
-                        if (tabela.existe(nomeVariavel) || tabelaRegistro.containsKey(nomeVariavel)) {
-                            adicionaErroSemantico(ic.getStart(), "identificador " + nomeVariavel + " ja declarado anteriormente");
-                        } else {  
-                            adicionaSimboloTabela(nomeVariavel, "registro", ic.getStart(), ctx.variavel().tipo().getStart(), TipoEntrada.VARIAVEL);                            
+            tipoVariavel = contexto.variavel().tipo().getText();
 
-                            for (int i = 0; i < variaveisRegistro.size(); i = i + 2) {
-                                adicionaSimboloTabela(nomeVariavel + "." + variaveisRegistro.get(i), variaveisRegistro.get(i+1), ic.getStart(), ctx.variavel().tipo().getStart(), TipoEntrada.VARIAVEL);
-                            }
-                        }
-                    }
-                } else {
-                    for (AlgumaGramT4Parser.IdentificadorContext ident : ctx.variavel().identificador()) {
-                        nomeVariavel = ident.getText();
-                        
-                        if (dadosFuncaoProcedimento.containsKey(nomeVariavel))
-                            adicionaErroSemantico(ident.getStart(), "identificador " + nomeVariavel + " ja declarado anteriormente");
-                        else
-                            adicionaSimboloTabela(nomeVariavel, tipoVariavel, ident.getStart(), ctx.variavel().tipo().getStart(), TipoEntrada.VARIAVEL); 
-                    }
-                }
+            // Adiciona a variável atual na tabela
+            for (AlgumaGramT3Parser.IdentificadorContext ident : contexto.variavel().identificador()) {
+
+                nomeVariavel = ident.getText();
+                adicionaVariavelTabela(nomeVariavel, tipoVariavel, ident.getStart(), contexto.variavel().tipo().getStart());
             }
-        } else if (ctx.getText().contains("tipo")) {
-            
-            if (ctx.tipo().registro() != null) {
-                ArrayList<String> variaveisRegistro = new ArrayList<>();
-                
-                for (AlgumaGramT4Parser.VariavelContext vc : ctx.tipo().registro().variavel()) {
-                    tipoVariavel = vc.tipo().getText();
-                    
-                    for (AlgumaGramT4Parser.IdentificadorContext ic : vc.identificador()) {
-                        variaveisRegistro.add(ic.getText());
-                        variaveisRegistro.add(tipoVariavel);
-                    }
-                }
-                tabelaRegistro.put(ctx.IDENT().getText(), variaveisRegistro);
-            }
-        } else if (ctx.getText().contains("constante"))
-            adicionaSimboloTabela(ctx.IDENT().getText(), ctx.tipo_basico().getText(), ctx.IDENT().getSymbol(), ctx.IDENT().getSymbol(), TipoEntrada.VARIAVEL);
-        
-        return super.visitDeclaracao_local(ctx);
-    }
-    
-    @Override
-    public Void visitDeclaracao_global(AlgumaGramT4Parser.Declaracao_globalContext ctx) {
-        escoposAninhados.criarNovoEscopo();
-        
-        tabela = escoposAninhados.obterEscopoAtual();
-
-        ArrayList<TipoAlguma> tiposVariaveis = new ArrayList<>();
-        ArrayList<String> variaveisRegistro;
-                
-        String tipoVariavel;
-        TipoAlguma tipoAux;
-        
-        if (ctx.getText().contains("procedimento")) {
-            
-            for (AlgumaGramT4Parser.ParametroContext parametro : ctx.parametros().parametro()) {
-                if (parametro.tipo_estendido().tipo_basico_ident().tipo_basico() != null) {
-                    adicionaSimboloTabela(parametro.identificador().get(0).getText(), parametro.tipo_estendido().tipo_basico_ident().tipo_basico().getText(), parametro.getStart(), parametro.getStart(), TipoEntrada.VARIAVEL);
-                    
-                    tipoVariavel = parametro.tipo_estendido().getText();
-                    tipoAux = confereTipo(tabelaRegistro, tipoVariavel);
-                    tiposVariaveis.add(tipoAux);
-                } else if (tabelaRegistro.containsKey(parametro.tipo_estendido().tipo_basico_ident().IDENT().getText())) {
-                    variaveisRegistro = tabelaRegistro.get(parametro.tipo_estendido().tipo_basico_ident().IDENT().getText());
-
-                    tipoVariavel = parametro.tipo_estendido().getText();
-                    tipoAux = confereTipo(tabelaRegistro, tipoVariavel);
-                    tiposVariaveis.add(tipoAux);
-
-                    for (AlgumaGramT4Parser.IdentificadorContext ic : parametro.identificador())
-                        for (int i = 0; i < variaveisRegistro.size(); i = i + 2)
-                            adicionaSimboloTabela(ic.getText() + "." + variaveisRegistro.get(i), variaveisRegistro.get(i + 1), ic.getStart(), ic.getStart(), TipoEntrada.VARIAVEL);                       
-                } else
-                    adicionaErroSemantico(parametro.getStart(), "tipo nao declarado");                       
-            }
-            for (AlgumaGramT4Parser.CmdContext c : ctx.cmd())    
-                if (c.cmdRetorne() != null)  
-                    adicionaErroSemantico(c.getStart(), "comando retorne nao permitido nesse escopo");    
-            
-            dadosFuncaoProcedimento.put(ctx.IDENT().getText(), tiposVariaveis);
-            
-        } else if (ctx.getText().contains("funcao")) {
-            for (AlgumaGramT4Parser.ParametroContext parametro : ctx.parametros().parametro()) {
-                
-                if (parametro.tipo_estendido().tipo_basico_ident().tipo_basico() != null) {
-                
-                    adicionaSimboloTabela(parametro.identificador().get(0).getText(), parametro.tipo_estendido().tipo_basico_ident().tipo_basico().getText(), parametro.getStart(), parametro.getStart(), TipoEntrada.VARIAVEL);
-
-                    tipoVariavel = parametro.tipo_estendido().getText();
-                    tipoAux = confereTipo(tabelaRegistro, tipoVariavel);
-                    tiposVariaveis.add(tipoAux);
-                } else if (tabelaRegistro.containsKey(parametro.tipo_estendido().tipo_basico_ident().IDENT().getText())) {
-
-                    variaveisRegistro = tabelaRegistro.get(parametro.tipo_estendido().tipo_basico_ident().IDENT().getText());
-
-                    tipoVariavel = parametro.tipo_estendido().tipo_basico_ident().IDENT().getText();
-                    tipoAux = confereTipo(tabelaRegistro, tipoVariavel);
-                    tiposVariaveis.add(tipoAux);
-                    
-                    for (AlgumaGramT4Parser.IdentificadorContext ic : parametro.identificador())
-                        for (int i = 0; i < variaveisRegistro.size(); i = i + 2)
-                                adicionaSimboloTabela(ic.getText() + "." + variaveisRegistro.get(i), variaveisRegistro.get(i + 1), ic.getStart(), ic.getStart(), TipoEntrada.VARIAVEL);
-                } else
-                    adicionaErroSemantico(parametro.getStart(), "tipo nao declarado");
-            }
-            
-            dadosFuncaoProcedimento.put(ctx.IDENT().getText(), tiposVariaveis);
         }
-        
-        super.visitDeclaracao_global(ctx);
-        
-        escoposAninhados.abandonarEscopo();
-        
-        if (ctx.getText().contains("procedimento"))      
-            adicionaSimboloTabela(ctx.IDENT().getText(), "void", ctx.getStart(), ctx.getStart(), TipoEntrada.PROCEDIMENTO);
-        else if (ctx.getText().contains("funcao"))
-            adicionaSimboloTabela(ctx.IDENT().getText(), ctx.tipo_estendido().tipo_basico_ident().tipo_basico().getText(), ctx.getStart(), ctx.getStart(), TipoEntrada.FUNCAO);
 
-        return null;
+        return super.visitDeclaracao_local(contexto);
     }
 
     @Override
-    public Void visitCmdLeia(AlgumaGramT4Parser.CmdLeiaContext ctx) {
+    public Void visitCmdLeia(AlgumaGramT3Parser.CmdLeiaContext contexto) {
+
         tabela = escoposAninhados.obterEscopoAtual();
-        
-        for (AlgumaGramT4Parser.IdentificadorContext id : ctx.identificador()) 
+
+        for (AlgumaGramT3Parser.IdentificadorContext id : contexto.identificador())
+            // Verifica se a variável já foi declarada
             if (!tabela.existe(id.getText()))
                 adicionaErroSemantico(id.getStart(), "identificador " + id.getText() + " nao declarado");
 
-        return super.visitCmdLeia(ctx);
+        return super.visitCmdLeia(contexto);
     }
 
     @Override
-    public Void visitCmdEscreva(AlgumaGramT4Parser.CmdEscrevaContext ctx) {
+    public Void visitCmdEscreva(AlgumaGramT3Parser.CmdEscrevaContext contexto) {
+
         tabela = escoposAninhados.obterEscopoAtual();
-                
+
         TipoAlguma tipo;
-                
-        for (AlgumaGramT4Parser.ExpressaoContext expressao : ctx.expressao())
+
+        for (AlgumaGramT3Parser.ExpressaoContext expressao : contexto.expressao())
             tipo = verificarTipo(tabela, expressao);
 
-        return super.visitCmdEscreva(ctx);
+        return super.visitCmdEscreva(contexto);
     }
 
     @Override
-    public Void visitCmdEnquanto(AlgumaGramT4Parser.CmdEnquantoContext ctx) {
+    public Void visitCmdEnquanto(AlgumaGramT3Parser.CmdEnquantoContext contexto) {
+
         tabela = escoposAninhados.obterEscopoAtual();
-        
-        TipoAlguma tipo = verificarTipo(tabela, ctx.expressao());
-        
-        return super.visitCmdEnquanto(ctx);
+
+        TipoAlguma tipo = verificarTipo(tabela, contexto.expressao());
+
+        return super.visitCmdEnquanto(contexto);
     }
 
     @Override
-    public Void visitCmdSe(AlgumaGramT4Parser.CmdSeContext ctx) {
+    public Void visitCmdAtribuicao(AlgumaGramT3Parser.CmdAtribuicaoContext contexto) {
+
         tabela = escoposAninhados.obterEscopoAtual();
-        
-        TipoAlguma tipo = verificarTipo(tabela, ctx.expressao());
-        
-        return super.visitCmdSe(ctx);
-    }
-        
-    @Override
-    public Void visitCmdAtribuicao(AlgumaGramT4Parser.CmdAtribuicaoContext ctx) {
-        tabela = escoposAninhados.obterEscopoAtual();
-        
-        TipoAlguma tipoExpressao = verificarTipo(tabela, ctx.expressao());
-        
-        String varNome = ctx.identificador().getText();
-        
+
+        TipoAlguma tipoExpressao = verificarTipo(tabela, contexto.expressao());
+
+        String varNome = contexto.identificador().getText();
+
         if (tipoExpressao != TipoAlguma.INVALIDO) {
-            if (!tabela.existe(varNome))
-                adicionaErroSemantico(ctx.identificador().getStart(), "identificador " + ctx.identificador().getText() + " nao declarado");
-            else {
-                TipoAlguma varTipo = verificarTipo(tabela, varNome);                
+            // Caso a variável não tenha sido declarada, informa o erro
+            if (!tabela.existe(varNome)) {
+                adicionaErroSemantico(contexto.identificador().getStart(),
+                        "identificador " + contexto.identificador().getText() + " nao declarado");
+            } else {
+                // Senão, identifica o tipo da variável para as condições posteriores
+                TipoAlguma varTipo = verificarTipo(tabela, varNome);
+
+                // Caso o tipo seja inteiro ou real, é utilizada a função verificaCompatibilidade
+                // para verificar se o valor a ser trabalhado é real ou não
                 if (varTipo == TipoAlguma.INTEIRO || varTipo == TipoAlguma.REAL) {
-                    if (ctx.getText().contains("ponteiro")) {
-                        if (!verificaCompatibilidade(varTipo, tipoExpressao))
-                            if (tipoExpressao != TipoAlguma.INTEIRO)
-                                adicionaErroSemantico(ctx.identificador().getStart(), "atribuicao nao compativel para ^" + ctx.identificador().getText());
-                    } else if (!verificaCompatibilidade(varTipo, tipoExpressao))
-                        if (tipoExpressao != TipoAlguma.INTEIRO)
-                            adicionaErroSemantico(ctx.identificador().getStart(), "atribuicao nao compativel para " + ctx.identificador().getText());               
+                    if (!verificaCompatibilidade(varTipo, tipoExpressao)) {
+                        // Caso o tipo da expressão (restante da parcela sendo analisada) seja diferente de inteiro,
+                        // não é possível tratar o valor como um número real
+                        if (tipoExpressao != TipoAlguma.INTEIRO) {
+                            adicionaErroSemantico(contexto.identificador().getStart(),
+                                    "atribuicao nao compativel para " + contexto.identificador().getText());
+                        }
+                    }
+                    // Caso a expressão analisada não tenha números que precisem ser tratados de maneira especial,
+                    // apenas verifica se os tipos são diferentes
                 } else if (varTipo != tipoExpressao)
-                    adicionaErroSemantico(ctx.identificador().getStart(), "atribuicao nao compativel para " + ctx.identificador().getText());
+                    adicionaErroSemantico(contexto.identificador().getStart(),
+                            "atribuicao nao compativel para " + contexto.identificador().getText());
             }
         }
-        
-        return super.visitCmdAtribuicao(ctx);
+
+        return super.visitCmdAtribuicao(contexto);
     }
 
 }
